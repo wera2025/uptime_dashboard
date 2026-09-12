@@ -1,24 +1,23 @@
-// Минимальный Service Worker для PWA
-const CACHE_NAME = 'uptime-dashboard-v2';
-const ASSETS = [
-  './',
-  './index.html'
-];
+// Минимальный Service Worker.
+// Нужен только для того, чтобы Chrome разрешил установку PWA.
+// Ничего не кэширует — все данные всегда грузятся из сети.
 
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
-  );
-  self.skipWaiting();
+self.addEventListener('install', () => {
+  self.skipWaiting(); // активироваться сразу, не ждать
 });
 
-self.addEventListener('activate', (e) => {
-  e.waitUntil(self.clients.claim());
-});
-
-self.addEventListener('fetch', (e) => {
-  // Сеть в приоритете, кэш — как fallback (чтобы данные с ntfy всегда были свежие)
-  e.respondWith(
-    fetch(e.request).catch(() => caches.match(e.request))
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    Promise.all([
+      self.clients.claim(), // взять контроль над страницами
+      // Удаляем все старые кэши, если они были
+      caches.keys().then((keys) =>
+        Promise.all(keys.map((key) => caches.delete(key)))
+      )
+    ])
   );
 });
+
+// Обработчик fetch обязателен для установки PWA.
+// Ничего не делает — просто пропускает запросы в сеть.
+self.addEventListener('fetch', () => {});
