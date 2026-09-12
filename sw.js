@@ -17,7 +17,3 @@ self.addEventListener('activate', (event) => {
     ])
   );
 });
-
-// Обработчик fetch обязателен для установки PWA.
-// Ничего не делает — просто пропускает запросы в сеть.
-self.addEventListener('fetch', () => {});
