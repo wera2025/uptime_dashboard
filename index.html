@@ -186,7 +186,7 @@ window.addEventListener('appinstalled', () => {
 const CHANNELS = [
   { name: 'MALYN',     ntfyUrl: 'https://ntfy.sh/MALIN',     routerStartTime: '2026-09-10T08:00:00Z' },
   { name: 'CHAYKA',    ntfyUrl: 'https://ntfy.sh/CHAYKA',    routerStartTime: '2026-09-09T13:00:00Z' },
-  { name: 'TERESVA',   ntfyUrl: 'https://ntfy.sh/TERESVA',   routerStartTime: '2026-08-22T08:00:00Z' },
+  { name: 'TERESVA',   ntfyUrl: 'https://ntfy.sh/TERESVA',   routerStartTime: '2026-07-22T08:00:00Z' },
   { name: 'MUKACHEVO', ntfyUrl: 'https://ntfy.sh/MUKACHEVO', routerStartTime: '2026-09-11T21:00:00Z' }
 ];
 
@@ -276,7 +276,7 @@ function buildColoredBar(seconds, maxSeconds, barLength) {
   barLength = barLength || 10;
   if (maxSeconds <= 0) return '⬜'.repeat(barLength);
   if (seconds > maxSeconds) {
-    return '🟩'.repeat(barLength) + ' > ' + MAX_DAYS_FOR_CHART + 'д';
+    return '🟩'.repeat(barLength) + '>'+ MAX_DAYS_FOR_CHART;
   }
   const ratio = Math.min(seconds / maxSeconds, 1);
   const filled = Math.max(1, Math.round(ratio * barLength));
