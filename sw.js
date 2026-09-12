@@ -1,5 +1,5 @@
 // Минимальный Service Worker для PWA
-const CACHE_NAME = 'uptime-dashboard-v1';
+const CACHE_NAME = 'uptime-dashboard-v2';
 const ASSETS = [
   './',
   './index.html'
