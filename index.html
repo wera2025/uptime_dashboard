@@ -126,10 +126,10 @@
   .card .time b { color: #e6edf3; font-weight: 600; }
 
   .footer {
-    text-align: center;
-    color: #484f58;
-    font-size: 12px;
-    margin-top: 24px;
+  text-align: center;
+  color: #8b949e;
+  font-size: 16px;
+  margin-top: 32px;
   }
   .error { color: #f85149; }
 </style>
@@ -400,8 +400,7 @@ async function loadAll(force) {
   } catch (e) {}
 
   document.getElementById('footer').textContent =
-    'Обновлено в ' + new Date().toLocaleTimeString('ru-RU') +
-    ' • потяните вниз для обновления';
+    'Обновлено в ' + new Date().toLocaleTimeString('ru-RU');
 
   loading = false;
   hidePullIndicator();
