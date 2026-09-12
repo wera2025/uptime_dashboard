@@ -129,7 +129,7 @@
   text-align: center;
   color: #8b949e;
   font-size: 16px;
-  margin-top: 32px;
+  margin-top: 24px;
   }
   .error { color: #f85149; }
 </style>
@@ -400,7 +400,7 @@ async function loadAll(force) {
   } catch (e) {}
 
   document.getElementById('footer').textContent =
-    'Обновлено в ' + new Date().toLocaleTimeString('ru-RU');
+    'обновлено в ' + new Date().toLocaleTimeString('ru-RU');
 
   loading = false;
   hidePullIndicator();
