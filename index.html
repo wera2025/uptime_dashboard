@@ -99,7 +99,7 @@
 <div class="container">
   <header>
     <h1>🛜 UPTIME DASHBOARD</h1>
-    <button id="refresh" onclick="loadAll(true)">Обновить</button>
+    <button id="refresh" onclick="loadAll()">Обновить</button>
   </header>
   <div id="content">
     <div class="status">Загрузка…</div>
@@ -119,9 +119,7 @@ const CHANNELS = [
 ];
 
 const MAX_DAYS_FOR_CHART = 30;
-const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 минут
-const MIN_REFRESH_GAP_MS = 30 * 1000;  // не чаще раза в 30 сек
-const FETCH_TIMEOUT_MS = 8000;         // таймаут запроса к ntfy
+const FETCH_TIMEOUT_MS = 8000; // таймаут запроса к ntfy
 
 // ============================================================
 // LOCALSTORAGE (аналог db.bot)
@@ -312,8 +310,7 @@ function renderWithPlaceholders() {
 // ГЛАВНАЯ ЛОГИКА
 // ============================================================
 let loading = false;
-let cache = {};        // name -> { name, seconds, duration }
-let lastLoadTime = 0;
+let cache = {}; // name -> { name, seconds, duration }
 
 // Загружаем кэш из localStorage при старте
 try {
@@ -321,17 +318,10 @@ try {
   if (saved) cache = JSON.parse(saved);
 } catch (e) {}
 
-async function loadAll(force) {
+async function loadAll() {
   if (loading) return;
-
-  // Не дёргаем ntfy слишком часто
-  const now = Date.now();
-  if (!force && now - lastLoadTime < MIN_REFRESH_GAP_MS && Object.keys(cache).length > 0) {
-    return;
-  }
-  lastLoadTime = now;
-
   loading = true;
+
   const btn = document.getElementById('refresh');
   btn.disabled = true;
   btn.textContent = '…';
@@ -361,7 +351,7 @@ async function loadAll(force) {
 
   document.getElementById('footer').textContent =
     'Обновлено в ' + new Date().toLocaleTimeString('ru-RU') +
-    ' • автообновление каждые 5 мин';
+    ' • обновление только вручную';
 
   loading = false;
   btn.disabled = false;
@@ -371,12 +361,11 @@ async function loadAll(force) {
 // ============================================================
 // СТАРТ
 // ============================================================
-loadAll(false);                       // первый запуск
-setInterval(() => loadAll(false), AUTO_REFRESH_MS); // автообновление
+loadAll(); // первый запуск
 
 // Обновление при возврате в приложение
 document.addEventListener('visibilitychange', function() {
-  if (!document.hidden) loadAll(false);
+  if (!document.hidden) loadAll();
 });
 
 // Регистрация service worker (если рядом лежит sw.js)
