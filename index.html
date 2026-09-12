@@ -43,6 +43,24 @@
     letter-spacing: 0.5px;
   }
 
+  /* Кнопка установки PWA */
+  #install-btn {
+    display: none;
+    width: 100%;
+    margin: 0 0 20px;
+    padding: 12px 20px;
+    background: #238636;
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #install-btn:active { background: #2ea043; }
+
+  /* Индикатор pull-to-refresh */
   #pull-indicator {
     position: fixed;
     top: 0;
@@ -129,6 +147,9 @@
   <header>
     <h1>📶 UPTIME DASHBOARD</h1>
   </header>
+
+  <button id="install-btn">📲 Установить приложение</button>
+
   <div id="content">
     <div class="status">Загрузка…</div>
   </div>
@@ -136,6 +157,35 @@
 </div>
 
 <script>
+// ============================================================
+// УСТАНОВКА PWA
+// ============================================================
+let deferredPrompt = null;
+const installBtn = document.getElementById('install-btn');
+
+// Chrome вызывает это событие, когда сайт готов к установке
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.style.display = 'block';
+});
+
+// Клик по кнопке — показываем системный диалог установки
+installBtn.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  // Прячем кнопку после попытки
+  installBtn.style.display = 'none';
+  deferredPrompt = null;
+});
+
+// Если установка прошла — прячем кнопку
+window.addEventListener('appinstalled', () => {
+  installBtn.style.display = 'none';
+  deferredPrompt = null;
+});
+
 // ============================================================
 // КОНФИГ
 // ============================================================
@@ -150,7 +200,7 @@ const MAX_DAYS_FOR_CHART = 30;
 const FETCH_TIMEOUT_MS = 8000;
 const PULL_THRESHOLD = 80;
 const PULL_MAX = 120;
-const VISIBILITY_REFRESH_GAP_MS = 10000; // не чаще раза в 10 сек при возврате
+const VISIBILITY_REFRESH_GAP_MS = 10000;
 
 // ============================================================
 // LOCALSTORAGE
@@ -343,7 +393,6 @@ async function loadAll() {
 
   await Promise.all(promises);
 
-  // Перерисовываем один раз после всех ответов
   renderWithPlaceholders();
 
   try {
