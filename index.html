@@ -276,7 +276,7 @@ function buildColoredBar(seconds, maxSeconds, barLength) {
   barLength = barLength || 10;
   if (maxSeconds <= 0) return '⬜'.repeat(barLength);
   if (seconds > maxSeconds) {
-    return '🟩'.repeat(barLength) + '>';
+    return '🟩'.repeat(barLength) + ' > ' + MAX_DAYS_FOR_CHART + ' days ';
   }
   const ratio = Math.min(seconds / maxSeconds, 1);
   const filled = Math.max(1, Math.round(ratio * barLength));
