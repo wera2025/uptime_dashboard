@@ -6,8 +6,7 @@
 <meta name="theme-color" content="#0e1117">
 <title>UPTIME DASHBOARD</title>
 
-<!-- PWA-манифест (inline) -->
-<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Uptime%20Dashboard%22%2C%22short_name%22%3A%22Uptime%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230e1117%22%2C%22theme_color%22%3A%22%230e1117%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%253D%2527http%253A%2F%2Fwww.w3.org%2F2000%2Fsvg%2527%2520viewBox%253D%25270%25200%252064%252064%2527%253E%253Crect%2520width%253D%252764%2527%2520height%253D%252764%2527%2520rx%253D%252712%2527%2520fill%253D%2527%25230e1117%2527%2F%253E%253Ctext%2520x%253D%252732%2527%2520y%253D%252742%2527%2520font-size%253D%252732%2527%2520text-anchor%253D%2527middle%2527%253E%25F0%259F%259B%259C%253C%2Ftext%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%2264x64%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
+<link rel="manifest" href="manifest.json">
 
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -31,6 +30,9 @@
     transition: transform 0.2s ease-out;
   }
   header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
     margin-bottom: 20px;
     padding-bottom: 14px;
     border-bottom: 2px solid #21262d;
@@ -39,10 +41,8 @@
     font-size: 20px;
     margin: 0;
     letter-spacing: 0.5px;
-    text-align: center;
   }
 
-  /* Индикатор pull-to-refresh */
   #pull-indicator {
     position: fixed;
     top: 0;
@@ -120,7 +120,6 @@
 </head>
 <body>
 
-<!-- Индикатор pull-to-refresh -->
 <div id="pull-indicator">
   <span id="pull-spinner"></span>
   <span id="pull-text">Потяните для обновления</span>
@@ -148,12 +147,13 @@ const CHANNELS = [
 ];
 
 const MAX_DAYS_FOR_CHART = 30;
-const FETCH_TIMEOUT_MS = 8000;   // таймаут запроса к ntfy
-const PULL_THRESHOLD = 80;       // пикселей, чтобы сработало обновление
-const PULL_MAX = 120;            // максимум, на сколько можно вытянуть контейнер
+const FETCH_TIMEOUT_MS = 8000;
+const PULL_THRESHOLD = 80;
+const PULL_MAX = 120;
+const VISIBILITY_REFRESH_GAP_MS = 10000; // не чаще раза в 10 сек при возврате
 
 // ============================================================
-// LOCALSTORAGE (аналог db.bot)
+// LOCALSTORAGE
 // ============================================================
 const DB = {
   get(key) {
@@ -170,13 +170,10 @@ const DB = {
 async function tryLoad(ntfyUrl, sinceParam) {
   try {
     const url = ntfyUrl + '/json?poll=1&since=' + sinceParam;
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
     const response = await fetch(url, { signal: controller.signal });
     clearTimeout(timeoutId);
-
     const text = await response.text();
     const lines = text.split('\n');
     const messages = [];
@@ -235,11 +232,9 @@ function getBarColor(seconds) {
 function buildColoredBar(seconds, maxSeconds, barLength) {
   barLength = barLength || 10;
   if (maxSeconds <= 0) return '⬜'.repeat(barLength);
-
   if (seconds > maxSeconds) {
     return '🟩'.repeat(barLength) + ' > ' + MAX_DAYS_FOR_CHART + 'д';
   }
-
   const ratio = Math.min(seconds / maxSeconds, 1);
   const filled = Math.max(1, Math.round(ratio * barLength));
   const empty = barLength - filled;
@@ -252,7 +247,6 @@ function buildColoredBar(seconds, maxSeconds, barLength) {
 // ============================================================
 async function processChannel(channel) {
   const messages = await loadRecentMessages(channel.ntfyUrl);
-
   let lastTimestamp = null;
   if (messages && messages.length > 0) {
     let maxTime = 0;
@@ -263,10 +257,8 @@ async function processChannel(channel) {
     }
     if (maxTime > 0) lastTimestamp = maxTime;
   }
-
   const dbKey = 'router_start_' + channel.name;
   let startTimestamp;
-
   if (lastTimestamp) {
     DB.set(dbKey, String(lastTimestamp));
     startTimestamp = lastTimestamp;
@@ -278,9 +270,7 @@ async function processChannel(channel) {
       startTimestamp = getRouterStartTimestamp(channel.routerStartTime);
     }
   }
-
   const seconds = getDurationSeconds(startTimestamp);
-
   return {
     name: channel.name,
     seconds: seconds,
@@ -300,10 +290,8 @@ function escapeHtml(s) {
 function renderWithPlaceholders() {
   const maxSeconds = MAX_DAYS_FOR_CHART * 86400;
   let html = '';
-
   for (const channel of CHANNELS) {
     const r = cache[channel.name];
-
     if (r) {
       const bar = buildColoredBar(r.seconds, maxSeconds, 10);
       html +=
@@ -321,7 +309,6 @@ function renderWithPlaceholders() {
         '</div>';
     }
   }
-
   document.getElementById('content').innerHTML = html;
 }
 
@@ -329,7 +316,8 @@ function renderWithPlaceholders() {
 // ГЛАВНАЯ ЛОГИКА
 // ============================================================
 let loading = false;
-let cache = {}; // name -> { name, seconds, duration }
+let cache = {};
+let lastVisibilityRefresh = 0;
 
 try {
   const saved = localStorage.getItem('dashboard_cache');
@@ -340,16 +328,13 @@ async function loadAll() {
   if (loading) return;
   loading = true;
 
-  // Показываем индикатор загрузки
   showPullIndicator('loading');
-
   renderWithPlaceholders();
 
   const promises = CHANNELS.map(async (channel) => {
     try {
       const result = await processChannel(channel);
       cache[result.name] = result;
-      renderWithPlaceholders();
       return result;
     } catch (e) {
       return null;
@@ -357,6 +342,9 @@ async function loadAll() {
   });
 
   await Promise.all(promises);
+
+  // Перерисовываем один раз после всех ответов
+  renderWithPlaceholders();
 
   try {
     localStorage.setItem('dashboard_cache', JSON.stringify(cache));
@@ -403,7 +391,6 @@ function hidePullIndicator() {
 }
 
 document.addEventListener('touchstart', (e) => {
-  // Срабатывает только если страница прокручена в самый верх
   if (window.scrollY === 0 && !loading) {
     touchStartY = e.touches[0].clientY;
     pulling = true;
@@ -412,23 +399,16 @@ document.addEventListener('touchstart', (e) => {
 
 document.addEventListener('touchmove', (e) => {
   if (!pulling || loading) return;
-
   const deltaY = e.touches[0].clientY - touchStartY;
-
-  // Тянем только вниз и только если страница в самом верху
   if (deltaY > 0 && window.scrollY === 0) {
-    // Не даём уйти слишком далеко
     currentPull = Math.min(deltaY * 0.5, PULL_MAX);
-
     container.style.transform = 'translateY(' + currentPull + 'px)';
-
     if (currentPull >= PULL_THRESHOLD) {
       showPullIndicator('ready');
     } else {
       showPullIndicator('pull');
     }
   } else {
-    // Если потянули вверх — отменяем
     if (currentPull > 0) hidePullIndicator();
     pulling = false;
   }
@@ -437,9 +417,7 @@ document.addEventListener('touchmove', (e) => {
 document.addEventListener('touchend', () => {
   if (!pulling) return;
   pulling = false;
-
   if (currentPull >= PULL_THRESHOLD) {
-    // Достаточно потянули — запускаем обновление
     container.style.transform = 'translateY(0)';
     currentPull = 0;
     loadAll();
@@ -453,12 +431,16 @@ document.addEventListener('touchend', () => {
 // ============================================================
 loadAll();
 
-// Обновление при возврате в приложение
 document.addEventListener('visibilitychange', function() {
-  if (!document.hidden) loadAll();
+  if (!document.hidden) {
+    const now = Date.now();
+    if (now - lastVisibilityRefresh > VISIBILITY_REFRESH_GAP_MS) {
+      lastVisibilityRefresh = now;
+      loadAll();
+    }
+  }
 });
 
-// Регистрация service worker (если рядом лежит sw.js)
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
