@@ -237,7 +237,7 @@ async function tryLoad(ntfyUrl, sinceParam) {
 
 async function loadRecentMessages(ntfyUrl) {
   // Только 1 день — один запрос, без каскада
-  return await tryLoad(ntfyUrl, '1d');
+  return await tryLoad(ntfyUrl, '24h');
 }
 
 // ============================================================
