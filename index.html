@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#0e1117">
 <title>UPTIME DASHBOARD</title>
 
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0e1117">
+<!-- PWA-манифест (inline) -->
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Uptime%20Dashboard%22%2C%22short_name%22%3A%22Uptime%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230e1117%22%2C%22theme_color%22%3A%22%230e1117%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%253D%2527http%253A%2F%2Fwww.w3.org%2F2000%2Fsvg%2527%2520viewBox%253D%25270%25200%252064%252064%2527%253E%253Crect%2520width%253D%252764%2527%2520height%253D%252764%2527%2520rx%253D%252712%2527%2520fill%253D%2527%25230e1117%2527%2F%253E%253Ctext%2520x%253D%252732%2527%2520y%253D%252742%2527%2520font-size%253D%252732%2527%2520text-anchor%253D%2527middle%2527%253E%25F0%259F%259B%259C%253C%2Ftext%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%2264x64%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
 
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -18,6 +18,7 @@
     color: #e6edf3;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     min-height: 100vh;
+    overscroll-behavior-y: contain;
   }
   body {
     padding: env(safe-area-inset-top) env(safe-area-inset-right)
@@ -27,11 +28,9 @@
     max-width: 640px;
     margin: 0 auto;
     padding: 20px 16px 40px;
+    transition: transform 0.2s ease-out;
   }
   header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     margin-bottom: 20px;
     padding-bottom: 14px;
     border-bottom: 2px solid #21262d;
@@ -41,18 +40,41 @@
     margin: 0;
     letter-spacing: 0.5px;
   }
-  #refresh {
-    background: #21262d;
-    border: 1px solid #30363d;
-    color: #e6edf3;
-    font-size: 14px;
-    padding: 8px 14px;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background 0.15s;
+
+  /* Индикатор pull-to-refresh */
+  #pull-indicator {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8b949e;
+    font-size: 13px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 100;
   }
-  #refresh:active { background: #30363d; }
-  #refresh:disabled { opacity: 0.5; cursor: wait; }
+  #pull-indicator.visible { opacity: 1; }
+  #pull-indicator.ready { color: #58a6ff; }
+
+  #pull-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    border: 2px solid #30363d;
+    border-top-color: #58a6ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #pull-indicator.loading #pull-spinner { opacity: 1; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .status {
     text-align: center;
@@ -96,10 +118,17 @@
 </style>
 </head>
 <body>
-<div class="container">
- <header>
-  <h1>🛜 UPTIME DASHBOARD</h1>
-</header>
+
+<!-- Индикатор pull-to-refresh -->
+<div id="pull-indicator">
+  <span id="pull-spinner"></span>
+  <span id="pull-text">Потяните для обновления</span>
+</div>
+
+<div class="container" id="container">
+  <header>
+    <h1>🛜 UPTIME DASHBOARD</h1>
+  </header>
   <div id="content">
     <div class="status">Загрузка…</div>
   </div>
@@ -118,7 +147,9 @@ const CHANNELS = [
 ];
 
 const MAX_DAYS_FOR_CHART = 30;
-const FETCH_TIMEOUT_MS = 8000; // таймаут запроса к ntfy
+const FETCH_TIMEOUT_MS = 8000;   // таймаут запроса к ntfy
+const PULL_THRESHOLD = 80;       // пикселей, чтобы сработало обновление
+const PULL_MAX = 120;            // максимум, на сколько можно вытянуть контейнер
 
 // ============================================================
 // LOCALSTORAGE (аналог db.bot)
@@ -139,7 +170,6 @@ async function tryLoad(ntfyUrl, sinceParam) {
   try {
     const url = ntfyUrl + '/json?poll=1&since=' + sinceParam;
 
-    // Таймаут, чтобы зависший запрос не тормозил весь дашборд
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
@@ -163,11 +193,8 @@ async function tryLoad(ntfyUrl, sinceParam) {
 }
 
 async function loadRecentMessages(ntfyUrl) {
-  // Один запрос вместо каскада из пяти.
   let messages = await tryLoad(ntfyUrl, '1d');
   if (messages.length > 0) return messages;
-
-  // Если пусто — на случай редких сообщений пробуем 7d
   messages = await tryLoad(ntfyUrl, '7d');
   return messages;
 }
@@ -204,7 +231,6 @@ function getBarColor(seconds) {
   return '🟩';
 }
 
-// Вариант C: маркер "> 30д" при превышении лимита графика
 function buildColoredBar(seconds, maxSeconds, barLength) {
   barLength = barLength || 10;
   if (maxSeconds <= 0) return '⬜'.repeat(barLength);
@@ -270,13 +296,6 @@ function escapeHtml(s) {
   });
 }
 
-function setStatus(text, isError) {
-  const el = document.getElementById('content');
-  el.innerHTML = '<div class="status' + (isError ? ' error' : '') + '">' +
-                 escapeHtml(text) + '</div>';
-}
-
-// Рисует ВСЕ каналы: загруженные — с данными, остальные — с заглушкой
 function renderWithPlaceholders() {
   const maxSeconds = MAX_DAYS_FOR_CHART * 86400;
   let html = '';
@@ -311,7 +330,6 @@ function renderWithPlaceholders() {
 let loading = false;
 let cache = {}; // name -> { name, seconds, duration }
 
-// Загружаем кэш из localStorage при старте
 try {
   const saved = localStorage.getItem('dashboard_cache');
   if (saved) cache = JSON.parse(saved);
@@ -321,19 +339,15 @@ async function loadAll() {
   if (loading) return;
   loading = true;
 
-  const btn = document.getElementById('refresh');
-  btn.disabled = true;
-  btn.textContent = '…';
+  // Показываем индикатор загрузки
+  showPullIndicator('loading');
 
-  // 1. Сразу рисуем то, что есть в кэше, + заглушки для остальных
   renderWithPlaceholders();
 
-  // 2. Грузим все каналы ПАРАЛЛЕЛЬНО
   const promises = CHANNELS.map(async (channel) => {
     try {
       const result = await processChannel(channel);
       cache[result.name] = result;
-      // Как только один канал ответил — перерисовываем всё
       renderWithPlaceholders();
       return result;
     } catch (e) {
@@ -343,24 +357,100 @@ async function loadAll() {
 
   await Promise.all(promises);
 
-  // 3. Сохраняем кэш
   try {
     localStorage.setItem('dashboard_cache', JSON.stringify(cache));
   } catch (e) {}
 
   document.getElementById('footer').textContent =
     'Обновлено в ' + new Date().toLocaleTimeString('ru-RU') +
-    ' • обновление только вручную';
+    ' • потяните вниз для обновления';
 
   loading = false;
-  btn.disabled = false;
-  btn.textContent = 'Обновить';
+  hidePullIndicator();
 }
+
+// ============================================================
+// PULL-TO-REFRESH
+// ============================================================
+const container = document.getElementById('container');
+const indicator = document.getElementById('pull-indicator');
+const pullText = document.getElementById('pull-text');
+
+let touchStartY = 0;
+let pulling = false;
+let currentPull = 0;
+
+function showPullIndicator(state) {
+  indicator.classList.add('visible');
+  if (state === 'loading') {
+    indicator.classList.add('loading');
+    pullText.textContent = 'Обновление…';
+  } else if (state === 'ready') {
+    indicator.classList.remove('loading');
+    indicator.classList.add('ready');
+    pullText.textContent = 'Отпустите для обновления';
+  } else {
+    indicator.classList.remove('loading', 'ready');
+    pullText.textContent = 'Потяните для обновления';
+  }
+}
+
+function hidePullIndicator() {
+  indicator.classList.remove('visible', 'loading', 'ready');
+  container.style.transform = '';
+  currentPull = 0;
+}
+
+document.addEventListener('touchstart', (e) => {
+  // Срабатывает только если страница прокручена в самый верх
+  if (window.scrollY === 0 && !loading) {
+    touchStartY = e.touches[0].clientY;
+    pulling = true;
+  }
+}, { passive: true });
+
+document.addEventListener('touchmove', (e) => {
+  if (!pulling || loading) return;
+
+  const deltaY = e.touches[0].clientY - touchStartY;
+
+  // Тянем только вниз и только если страница в самом верху
+  if (deltaY > 0 && window.scrollY === 0) {
+    // Не даём уйти слишком далеко
+    currentPull = Math.min(deltaY * 0.5, PULL_MAX);
+
+    container.style.transform = 'translateY(' + currentPull + 'px)';
+
+    if (currentPull >= PULL_THRESHOLD) {
+      showPullIndicator('ready');
+    } else {
+      showPullIndicator('pull');
+    }
+  } else {
+    // Если потянули вверх — отменяем
+    if (currentPull > 0) hidePullIndicator();
+    pulling = false;
+  }
+}, { passive: true });
+
+document.addEventListener('touchend', () => {
+  if (!pulling) return;
+  pulling = false;
+
+  if (currentPull >= PULL_THRESHOLD) {
+    // Достаточно потянули — запускаем обновление
+    container.style.transform = 'translateY(0)';
+    currentPull = 0;
+    loadAll();
+  } else {
+    hidePullIndicator();
+  }
+}, { passive: true });
 
 // ============================================================
 // СТАРТ
 // ============================================================
-loadAll(); // первый запуск
+loadAll();
 
 // Обновление при возврате в приложение
 document.addEventListener('visibilitychange', function() {
