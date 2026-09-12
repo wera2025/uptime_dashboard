@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0e1117">
+<title>UPTIME DASHBOARD</title>
+
+<!-- PWA-манифест (для "Добавить на главный экран") -->
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Uptime%20Dashboard%22%2C%22short_name%22%3A%22Uptime%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230e1117%22%2C%22theme_color%22%3A%22%230e1117%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%253D%2527http%253A%2F%2Fwww.w3.org%2F2000%2Fsvg%2527%2520viewBox%253D%25270%25200%252064%252064%2527%253E%253Crect%2520width%253D%252764%2527%2520height%253D%252764%2527%2520rx%253D%252712%2527%2520fill%253D%2527%25230e1117%2527%2F%253E%253Ctext%2520x%253D%252732%2527%2520y%253D%252742%2527%2520font-size%253D%252732%2527%2520text-anchor%253D%2527middle%2527%253E%25F0%259F%259B%259C%253C%2Ftext%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%2264x64%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
+
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0e1117;
+    color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  body {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .container {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 20px 16px 40px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 2px solid #21262d;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0;
+    letter-spacing: 0.5px;
+  }
+  #refresh {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #e6edf3;
+    font-size: 14px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #refresh:active { background: #30363d; }
+  #refresh:disabled { opacity: 0.5; cursor: wait; }
+
+  .status {
+    text-align: center;
+    color: #8b949e;
+    font-size: 14px;
+    padding: 40px 0;
+  }
+  .card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 14px;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+  }
+  .card .name {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    letter-spacing: 0.5px;
+  }
+  .card .bar {
+    font-size: 20px;
+    line-height: 1.2;
+    margin-bottom: 8px;
+    word-break: break-all;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .card .time {
+    font-size: 15px;
+    color: #8b949e;
+  }
+  .card .time b { color: #e6edf3; font-weight: 600; }
+
+  .footer {
+    text-align: center;
+    color: #484f58;
+    font-size: 12px;
+    margin-top: 24px;
+  }
+  .error { color: #f85149; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>🛜 UPTIME DASHBOARD</h1>
+    <button id="refresh" onclick="loadAll()">Обновить</button>
+  </header>
+  <div id="content">
+    <div class="status">Загрузка…</div>
+  </div>
+  <div class="footer" id="footer"></div>
+</div>
+
+<script>
+// ============ КОНФИГ ============
+const CHANNELS = [
+  { name: 'MALYN',     ntfyUrl: 'https://ntfy.sh/MALIN',     routerStartTime: '2026-09-10T08:00:00Z' },
+  { name: 'CHAYKA',    ntfyUrl: 'https://ntfy.sh/CHAYKA',    routerStartTime: '2026-09-09T13:00:00Z' },
+  { name: 'TERESVA',   ntfyUrl: 'https://ntfy.sh/TERESVA',   routerStartTime: '2026-08-22T08:00:00Z' },
+  { name: 'MUKACHEVO', ntfyUrl: 'https://ntfy.sh/MUKACHEVO', routerStartTime: '2026-09-11T21:00:00Z' }
+];
+
+const MAX_DAYS_FOR_CHART = 30;
+const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 минут
+
+// ============ ДАННЫЕ ============
+// Храним даты старта в localStorage (аналог db.bot в боте)
+const DB = {
+  get(key) {
+    try { return localStorage.getItem('dashboard_' + key); } catch (e) { return null; }
+  },
+  set(key, value) {
+    try { localStorage.setItem('dashboard_' + key, String(value)); } catch (e) {}
+  }
+};
+
+// ============ NTFY ============
+async function tryLoad(ntfyUrl, sinceParam) {
+  try {
+    const url = ntfyUrl + '/json?poll=1&since=' + sinceParam;
+    const response = await fetch(url);
+    const text = await response.text();
+    const lines = text.split('\n');
+    const messages = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const data = JSON.parse(line);
+        if (data.event === 'message') messages.push(data);
+      } catch (e) {}
+    }
+    return messages;
+  } catch (error) { return []; }
+}
+
+async function loadRecentMessages(ntfyUrl) {
+  let messages = await tryLoad(ntfyUrl, '1d');
+  if (messages.length > 0) return messages;
+  messages = await tryLoad(ntfyUrl, '12h');
+  if (messages.length > 0) return messages;
+  messages = await tryLoad(ntfyUrl, '6h');
+  if (messages.length > 0) return messages;
+  messages = await tryLoad(ntfyUrl, '1h');
+  if (messages.length > 0) return messages;
+  messages = await tryLoad(ntfyUrl, '30m');
+  if (messages.length > 0) return messages;
+  return [];
+}
+
+// ============ РАСЧЁТЫ ============
+function getDurationSeconds(startTimestamp) {
+  if (!startTimestamp) return 0;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const diff = nowSeconds - startTimestamp;
+  return diff > 0 ? diff : 0;
+}
+
+function formatDuration(seconds) {
+  if (!seconds || seconds < 0) return '0д 0ч 0м';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return days + 'д ' + hours + 'ч ' + minutes + 'м';
+}
+
+function getRouterStartTimestamp(routerStartTime) {
+  try {
+    const dt = new Date(routerStartTime);
+    return Math.floor(dt.getTime() / 1000);
+  } catch (error) { return null; }
+}
+
+function getBarColor(seconds) {
+  const days = seconds / 86400;
+  if (days < 10)  return '🟥';
+  if (days < 20)  return '🟨';
+  return '🟩';
+}
+
+// Вариант C: маркер "> 30д" при превышении
+function buildColoredBar(seconds, maxSeconds, barLength) {
+  barLength = barLength || 10;
+  if (maxSeconds <= 0) return '⬜'.repeat(barLength);
+
+  if (seconds > maxSeconds) {
+    return '🟩'.repeat(barLength) + ' > ' + MAX_DAYS_FOR_CHART + 'д';
+  }
+
+  const ratio = Math.min(seconds / maxSeconds, 1);
+  const filled = Math.max(1, Math.round(ratio * barLength));
+  const empty = barLength - filled;
+  const color = getBarColor(seconds);
+  return color.repeat(filled) + '⬜'.repeat(empty);
+}
+
+// ============ ОБРАБОТКА КАНАЛА ============
+async function processChannel(channel) {
+  const messages = await loadRecentMessages(channel.ntfyUrl);
+
+  let lastTimestamp = null;
+  if (messages && messages.length > 0) {
+    let maxTime = 0;
+    for (const msg of messages) {
+      let ts = parseInt(msg.time);
+      if (ts > 10000000000) ts = Math.floor(ts / 1000);
+      if (ts > maxTime) maxTime = ts;
+    }
+    if (maxTime > 0) lastTimestamp = maxTime;
+  }
+
+  const dbKey = 'router_start_' + channel.name;
+  let startTimestamp;
+
+  if (lastTimestamp) {
+    DB.set(dbKey, String(lastTimestamp));
+    startTimestamp = lastTimestamp;
+  } else {
+    const saved = DB.get(dbKey);
+    if (saved && saved !== '' && saved !== 'null' && saved !== 'undefined') {
+      startTimestamp = parseInt(saved);
+    } else {
+      startTimestamp = getRouterStartTimestamp(channel.routerStartTime);
+    }
+  }
+
+  const seconds = getDurationSeconds(startTimestamp);
+  return {
+    name: channel.name,
+    seconds: seconds,
+    duration: formatDuration(seconds)
+  };
+}
+
+// ============ РЕНДЕР ============
+function render(results) {
+  const maxSeconds = MAX_DAYS_FOR_CHART * 86400;
+  let html = '';
+  for (const r of results) {
+    const bar = buildColoredBar(r.seconds, maxSeconds, 10);
+    html +=
+      '<div class="card">' +
+        '<div class="name">' + escapeHtml(r.name) + '</div>' +
+        '<div class="bar">' + bar + '</div>' +
+        '<div class="time">⏱ <b>' + r.duration + '</b></div>' +
+      '</div>';
+  }
+  document.getElementById('content').innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+
+function setStatus(text, isError) {
+  const el = document.getElementById('content');
+  el.innerHTML = '<div class="status' + (isError ? ' error' : '') + '">' + escapeHtml(text) + '</div>';
+}
+
+// ============ ГЛАВНАЯ ============
+let loading = false;
+
+async function loadAll() {
+  if (loading) return;
+  loading = true;
+
+  const btn = document.getElementById('refresh');
+  btn.disabled = true;
+  btn.textContent = '…';
+
+  try {
+    // Загружаем все каналы параллельно — быстрее, чем по очереди
+    const results = await Promise.all(CHANNELS.map(processChannel));
+    render(results);
+
+    const now = new Date();
+    document.getElementById('footer').textContent =
+      'Обновлено в ' + now.toLocaleTimeString('ru-RU') +
+      ' • автообновление каждые 5 мин';
+  } catch (e) {
+    setStatus('Ошибка: ' + (e && e.message ? e.message : e), true);
+  } finally {
+    loading = false;
+    btn.disabled = false;
+    btn.textContent = 'Обновить';
+  }
+}
+
+// Автообновление
+loadAll();
+setInterval(loadAll, AUTO_REFRESH_MS);
+
+// Обновление при возврате в приложение
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden) loadAll();
+});
+</script>
+</body>
+</html>
