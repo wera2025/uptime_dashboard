@@ -43,7 +43,6 @@
     letter-spacing: 0.5px;
   }
 
-  /* Кнопка установки PWA */
   #install-btn {
     display: none;
     width: 100%;
@@ -60,7 +59,6 @@
   }
   #install-btn:active { background: #2ea043; }
 
-  /* Индикатор pull-to-refresh */
   #pull-indicator {
     position: fixed;
     top: 0;
@@ -145,7 +143,7 @@
 
 <div class="container" id="container">
   <header>
-    <h1>📶 UPTIME DASHBOARD</h1>
+    <h1> UPTIME DASHBOARD</h1>
   </header>
 
   <button id="install-btn">📲 Установить приложение</button>
@@ -163,24 +161,20 @@
 let deferredPrompt = null;
 const installBtn = document.getElementById('install-btn');
 
-// Chrome вызывает это событие, когда сайт готов к установке
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
   installBtn.style.display = 'block';
 });
 
-// Клик по кнопке — показываем системный диалог установки
 installBtn.addEventListener('click', async () => {
   if (!deferredPrompt) return;
   deferredPrompt.prompt();
   const { outcome } = await deferredPrompt.userChoice;
-  // Прячем кнопку после попытки
   installBtn.style.display = 'none';
   deferredPrompt = null;
 });
 
-// Если установка прошла — прячем кнопку
 window.addEventListener('appinstalled', () => {
   installBtn.style.display = 'none';
   deferredPrompt = null;
@@ -197,10 +191,11 @@ const CHANNELS = [
 ];
 
 const MAX_DAYS_FOR_CHART = 30;
-const FETCH_TIMEOUT_MS = 8000;
+const FETCH_TIMEOUT_MS = 5000;           // таймаут запроса к ntfy — 5 сек
+const MIN_GAP_MS = 60000;                // 1 минута между автоматическими запросами
+const VISIBILITY_REFRESH_GAP_MS = 10000; // не чаще раза в 10 сек при возврате
 const PULL_THRESHOLD = 80;
 const PULL_MAX = 120;
-const VISIBILITY_REFRESH_GAP_MS = 10000;
 
 // ============================================================
 // LOCALSTORAGE
@@ -241,10 +236,8 @@ async function tryLoad(ntfyUrl, sinceParam) {
 }
 
 async function loadRecentMessages(ntfyUrl) {
-  let messages = await tryLoad(ntfyUrl, '1d');
-  if (messages.length > 0) return messages;
-  messages = await tryLoad(ntfyUrl, '7d');
-  return messages;
+  // Только 1 день — один запрос, без каскада
+  return await tryLoad(ntfyUrl, '1d');
 }
 
 // ============================================================
@@ -367,6 +360,7 @@ function renderWithPlaceholders() {
 // ============================================================
 let loading = false;
 let cache = {};
+let lastLoadTime = 0;
 let lastVisibilityRefresh = 0;
 
 try {
@@ -374,17 +368,25 @@ try {
   if (saved) cache = JSON.parse(saved);
 } catch (e) {}
 
-async function loadAll() {
+async function loadAll(force) {
   if (loading) return;
+
+  // Если недавно грузили и не форсируем — показываем кэш, не дёргаем ntfy
+  if (!force && Date.now() - lastLoadTime < MIN_GAP_MS && Object.keys(cache).length > 0) {
+    return;
+  }
+  lastLoadTime = Date.now();
   loading = true;
 
   showPullIndicator('loading');
   renderWithPlaceholders();
 
+  // Прогрессивный рендер: перерисовка после каждого ответившего канала
   const promises = CHANNELS.map(async (channel) => {
     try {
       const result = await processChannel(channel);
       cache[result.name] = result;
+      renderWithPlaceholders();
       return result;
     } catch (e) {
       return null;
@@ -392,8 +394,6 @@ async function loadAll() {
   });
 
   await Promise.all(promises);
-
-  renderWithPlaceholders();
 
   try {
     localStorage.setItem('dashboard_cache', JSON.stringify(cache));
@@ -469,7 +469,7 @@ document.addEventListener('touchend', () => {
   if (currentPull >= PULL_THRESHOLD) {
     container.style.transform = 'translateY(0)';
     currentPull = 0;
-    loadAll();
+    loadAll(true); // force = true — игнорируем лимит 1 минуты
   } else {
     hidePullIndicator();
   }
@@ -478,14 +478,14 @@ document.addEventListener('touchend', () => {
 // ============================================================
 // СТАРТ
 // ============================================================
-loadAll();
+loadAll(false); // первый запуск
 
 document.addEventListener('visibilitychange', function() {
   if (!document.hidden) {
     const now = Date.now();
     if (now - lastVisibilityRefresh > VISIBILITY_REFRESH_GAP_MS) {
       lastVisibilityRefresh = now;
-      loadAll();
+      loadAll(false); // не форсируем — сработает лимит 1 минуты
     }
   }
 });
